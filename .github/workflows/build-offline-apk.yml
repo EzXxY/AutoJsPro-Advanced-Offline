@@ -20,10 +20,10 @@ jobs:
       _JAVA_OPTIONS: -Xmx6g
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -34,7 +34,7 @@ jobs:
           packages: "build-tools;34.0.0 platform-tools"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -91,7 +91,7 @@ jobs:
           test -s AutoJsPro-fully-offline.apk
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AutoJsPro-fully-offline
           path: AutoJsPro-fully-offline.apk
@@ -103,7 +103,7 @@ jobs:
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/offline-v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: AutoJsPro-fully-offline-${{ github.ref_name }}.apk
           generate_release_notes: true
