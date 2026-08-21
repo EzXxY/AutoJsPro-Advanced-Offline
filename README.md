@@ -102,14 +102,25 @@ python build.py -v
 - 跳过首次启动的本地 TCP 代理激活流程；
 - 禁用 Bugly/Huawei 自动更新检查及其自动初始化组件；
 - 拒绝包含 `libcoreprotect.so`、`libcorevmp.so`、`vpntrust` 的在线校验注入基线；
-- 构建时不从第三方网盘下载 `assets/original.apk`，也不运行 ApkDataMultiplexing。
+- 保留 `libpatchio` 启动阶段必需的 `assets/original.apk`，并固定校验其 SHA-256；
+- 继续使用 ApkDataMultiplexing 对嵌入的原始 APK 做去重优化。
 
 本地生成并构建：
 
 ```bash
 python make_offline.py
-python build.py -i .build/AutojsPro_offline -o AutoJsPro-fully-offline.apk --hermetic
+python build.py -i .build/AutojsPro_offline -o AutoJsPro-fully-offline.apk
 ```
+
+`build.py` 首次会获取约 100 MB 的 `original.apk`，并要求 SHA-256 必须为：
+
+```text
+081F64E4DD2D484E67DB3314F13864E7026149399528409240B69B2FC6E567FE
+```
+
+该文件不是联网功能，而是 `libpatchio.so` 在 `attachBaseContext()` 阶段读取的运行时补丁输入；
+删除它会导致应用在界面出现前直接闪退。若构建环境本身也必须断网，请预先将文件放入
+`.build/AutojsPro_offline/assets/original.apk`，然后使用 `--hermetic` 禁止构建脚本下载。
 
 生成的 APK 没有 Android `INTERNET` 权限，因此应用本体和脚本均不能直接建立 TCP/UDP 网络连接；
 远程调试、网络请求、在线文档、热更新等联网功能也会随之不可用。

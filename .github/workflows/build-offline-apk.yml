@@ -68,12 +68,11 @@ jobs:
       - name: Generate hardened offline project
         run: python make_offline.py
 
-      - name: Build APK without third-party downloads
+      - name: Build APK with pinned original.apk hash
         run: >-
           python build.py
           -i .build/AutojsPro_offline
           -o AutoJsPro-fully-offline.apk
-          --hermetic
 
       - name: Verify APK has no Internet permission or injected online validator
         run: |
@@ -86,6 +85,10 @@ jobs:
           fi
           if unzip -l AutoJsPro-fully-offline.apk | grep -Eq 'libcoreprotect\.so|libcorevmp\.so'; then
             echo "::error::APK 中仍包含注入的在线校验库"
+            exit 1
+          fi
+          if ! unzip -l AutoJsPro-fully-offline.apk | grep -q 'assets/original\.apk'; then
+            echo "::error::APK 缺少 libpatchio 启动所需的 assets/original.apk"
             exit 1
           fi
           test -s AutoJsPro-fully-offline.apk

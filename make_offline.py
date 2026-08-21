@@ -144,7 +144,6 @@ def patch_splash(path: Path) -> None:
 def patch_apktool_yml(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     text = text.replace("versionName: Pro 9.3.11-0", "versionName: Pro 9.3.11-0 Offline")
-    text = re.sub(r"(?m)^- assets/original\.apk\r?\n?", "", text)
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
@@ -208,7 +207,7 @@ def main() -> int:
     if output.exists():
         shutil.rmtree(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, output, ignore=shutil.ignore_patterns("build", "original.apk"))
+    shutil.copytree(source, output, ignore=shutil.ignore_patterns("build"))
 
     patch_manifest(output / "AndroidManifest.xml")
     patch_app(output / "smali" / "org" / "autojs" / "autojs" / "App.smali")
@@ -220,6 +219,7 @@ def main() -> int:
 
     print(f"离线工程已生成: {output.relative_to(BASE)}")
     print("已移除 INTERNET/网络状态/Wi-Fi/VPN 权限、启动代理、在线校验入口和自动更新检查。")
+    print("注意：libpatchio 运行时仍需要 assets/original.apk；build.py 会下载并校验固定 SHA-256。")
     return 0
 
 
