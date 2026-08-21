@@ -1,6 +1,9 @@
 signed_before_optim.apk.idsig
 AutoJsPro-signed.apk
+AutoJsPro-fully-offline.apk
+AutoJsPro-fully-offline.apk.idsig
 autojspro.jks
 config.json
 AutoJsPro/build/
 AutojsPro_original/build/
+.build/

@@ -93,6 +93,34 @@ python build.py -i AutojsPro
 python build.py -v
 ```
 
+## 完全离线运行版
+
+仓库中的默认 `AutojsPro` 目录包含额外注入的在线校验逻辑，不适合作为无网络权限版本的基线。
+完全离线版从 `AutojsPro_original` 派生，在临时目录中完成以下处理：
+
+- 移除 `android.permission.INTERNET`、网络状态、Wi-Fi 控制与 VPN 权限；
+- 跳过首次启动的本地 TCP 代理激活流程；
+- 禁用 Bugly/Huawei 自动更新检查及其自动初始化组件；
+- 拒绝包含 `libcoreprotect.so`、`libcorevmp.so`、`vpntrust` 的在线校验注入基线；
+- 构建时不从第三方网盘下载 `assets/original.apk`，也不运行 ApkDataMultiplexing。
+
+本地生成并构建：
+
+```bash
+python make_offline.py
+python build.py -i .build/AutojsPro_offline -o AutoJsPro-fully-offline.apk --hermetic
+```
+
+生成的 APK 没有 Android `INTERNET` 权限，因此应用本体和脚本均不能直接建立 TCP/UDP 网络连接；
+远程调试、网络请求、在线文档、热更新等联网功能也会随之不可用。
+
+GitHub Actions 使用 `.github/workflows/build-offline-apk.yml`：
+
+- 手动运行 **Build Fully Offline APK** 会上传 Artifact；
+- 推送 `offline-v*` 标签会同时创建 Release；
+- 建议配置现有的 `KEYSTORE_BASE64`、`KEYSTORE_PASS`、`KEY_PASS`、`KEY_ALIAS` Secrets，
+  否则工作流会生成一次性临时签名，不同批次的 APK 无法覆盖升级安装。
+
 ## 构建流程
 
 1. **apktool 打包**：使用 `bin/apktool.jar` 将反编译目录打成未签名 APK。若存在 `<工程>/build` 缓存会先删除。

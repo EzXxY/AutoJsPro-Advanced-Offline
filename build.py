@@ -177,6 +177,11 @@ def main():
         action="store_true",
         help="打印 apktool 完整输出（默认使用静默模式 -q）",
     )
+    parser.add_argument(
+        "--hermetic",
+        action="store_true",
+        help="封闭构建：不下载 assets/original.apk，并禁用 ApkDataMultiplexing",
+    )
     args = parser.parse_args()
 
     config_path = BASE / "config.json"
@@ -231,14 +236,17 @@ def main():
 
     try:
         log("构建开始")
-        log_step(0, 6, "检查 assets/original.apk")
+        log_step(0, 6, "检查构建输入")
         if not apk_project.exists():
             log(f"[ERROR] 工程目录不存在: {_short(apk_project)}")
             log(f"失败 · 已耗时 {time.perf_counter() - t0:.2f}s")
             return 1
 
-        ensure_original_apk(apk_project)
-        log_done_line("original.apk 就绪", t_mark)
+        if args.hermetic:
+            log_done_line("封闭模式：跳过 original.apk 下载", t_mark)
+        else:
+            ensure_original_apk(apk_project)
+            log_done_line("original.apk 就绪", t_mark)
         t_mark = time.perf_counter()
 
         log_step(1, 6, "apktool 打包")
@@ -247,7 +255,12 @@ def main():
             log(f"     清除缓存: {_short(build_dir)}")
             shutil.rmtree(build_dir, ignore_errors=True)
 
-        apktool_cmd = ["java", "-jar", str(apktool_jar), "b"]
+        framework_dir = BASE / ".build" / "apktool-framework"
+        framework_dir.mkdir(parents=True, exist_ok=True)
+        apktool_cmd = [
+            "java", "-jar", str(apktool_jar), "b",
+            "--frame-path", str(framework_dir),
+        ]
         if not args.verbose:
             apktool_cmd.append("-q")
         apktool_cmd.extend([str(apk_project), "-o", str(unsigned_apk)])
@@ -270,7 +283,7 @@ def main():
         log_done_line("签名", t_mark)
         t_mark = time.perf_counter()
 
-        if mux_jar.exists():
+        if mux_jar.exists() and not args.hermetic:
             log_step(4, 6, "ApkDataMultiplexing 优化 + 重签")
             try:
                 run(["java", "-jar", str(mux_jar), "store_asset_apk", str(signed_before_optim_apk), str(signed_stored_apk)])
@@ -281,7 +294,8 @@ def main():
                 log(f"     [WARN] ApkDataMultiplexing 失败，已回退为 apksigner 产物: {e}")
             log_done_line("ApkDataMultiplexing", t_mark)
         else:
-            log_step(4, 6, "ApkDataMultiplexing（跳过，未找到 jar）")
+            reason = "封闭模式已禁用" if args.hermetic else "未找到 jar"
+            log_step(4, 6, f"ApkDataMultiplexing（跳过，{reason}）")
             shutil.copy2(signed_before_optim_apk, final_apk)
             log_done_line("复制中间包为最终输出", t_mark)
         t_mark = time.perf_counter()
