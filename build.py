@@ -160,25 +160,31 @@ def ensure_original_apk(apk_project: Path, *, allow_download: bool = True) -> No
             "封闭构建缺少 assets/original.apk；请先放入该文件再重新构建。"
         )
     assets.mkdir(parents=True, exist_ok=True)
-    log("     未找到 original.apk，正在下载…")
-    req = urllib.request.Request(
-        ORIGINAL_APK_PARSER_URL,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; build.py)"},
-    )
-    try:
-        _download_with_progress(req, target, timeout=300)
-    except (urllib.error.URLError, OSError) as e:
-        print()
+    last_error: Exception | None = None
+    for attempt in range(1, 5):
         target.unlink(missing_ok=True)
-        raise RuntimeError(f"下载 original.apk 失败: {e}") from e
-    if not target.is_file() or target.stat().st_size == 0:
-        target.unlink(missing_ok=True)
-        raise RuntimeError("下载 original.apk 失败：保存后文件为空")
-    try:
-        _verify_original_apk(target)
-    except RuntimeError:
-        target.unlink(missing_ok=True)
-        raise
+        log(f"     未找到 original.apk，正在下载（第 {attempt}/4 次）…")
+        req = urllib.request.Request(
+            ORIGINAL_APK_PARSER_URL,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; build.py)"},
+        )
+        try:
+            _download_with_progress(req, target, timeout=300)
+            if not target.is_file() or target.stat().st_size == 0:
+                raise RuntimeError("保存后文件为空")
+            _verify_original_apk(target)
+            break
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as e:
+            last_error = e
+            print()
+            target.unlink(missing_ok=True)
+            if attempt == 4:
+                raise RuntimeError(f"下载 original.apk 失败（已重试 4 次）: {e}") from e
+            delay = attempt * 10
+            log(f"     [WARN] 下载失败: {e}；{delay} 秒后重试")
+            time.sleep(delay)
+    else:
+        raise RuntimeError(f"下载 original.apk 失败: {last_error}")
     log(f"     已保存: {_short(target)}")
 
 
