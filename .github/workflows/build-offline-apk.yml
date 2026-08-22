@@ -79,6 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           AAPT="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt"
+          ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign"
           "$AAPT" dump permissions AutoJsPro-fully-offline.apk | tee permissions.txt
           if grep -q 'android.permission.INTERNET' permissions.txt; then
             echo "::error::APK 仍声明 android.permission.INTERNET"
@@ -92,7 +93,7 @@ jobs:
             echo "::error::APK 缺少 libpatchio 启动所需的 assets/original.apk"
             exit 1
           fi
-          zipalign -c -P 16 4 AutoJsPro-fully-offline.apk
+          "$ZIPALIGN" -c -P 16 4 AutoJsPro-fully-offline.apk
           test -s AutoJsPro-fully-offline.apk
 
       - name: Upload artifact
