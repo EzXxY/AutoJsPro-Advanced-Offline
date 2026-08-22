@@ -93,7 +93,7 @@ jobs:
             echo "::error::APK 缺少 libpatchio 启动所需的 assets/original.apk"
             exit 1
           fi
-          "$ZIPALIGN" -c -P 16 4 AutoJsPro-fully-offline.apk
+          "$ZIPALIGN" -c -p -v 4 AutoJsPro-fully-offline.apk
           test -s AutoJsPro-fully-offline.apk
 
       - name: Upload artifact
