@@ -12,6 +12,7 @@ APK 快速打包签名脚本
 """
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -28,6 +29,7 @@ BASE = Path(__file__).resolve().parent
 ORIGINAL_APK_PARSER_URL = (
     "https://lz.qaiu.top/parser?url=https://wwbjc.lanzouu.com/iPBZj3no0qif"
 )
+ORIGINAL_APK_SHA256 = "081f64e4dd2d484e67db3314f13864e7026149399528409240b69b2fc6e567fe"
 
 
 def _now() -> str:
@@ -137,27 +139,52 @@ def _zipalign_apk(zipalign_exe: Path, src: Path, dst: Path) -> str:
         return "zipalign -p 4（不支持 -P 16 已回退）"
 
 
-def ensure_original_apk(apk_project: Path) -> None:
-    """若 ``<工程>/assets/original.apk`` 不存在或为空，则从解析接口下载（跟随 302 直链）。"""
+def _verify_original_apk(path: Path) -> None:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest.lower() != ORIGINAL_APK_SHA256:
+        raise RuntimeError(
+            "original.apk SHA-256 不匹配："
+            f"expected={ORIGINAL_APK_SHA256}, actual={digest}"
+        )
+
+
+def ensure_original_apk(apk_project: Path, *, allow_download: bool = True) -> None:
+    """确保运行时补丁所需的 ``assets/original.apk`` 存在且哈希正确。"""
     assets = apk_project / "assets"
     target = assets / "original.apk"
     if target.is_file() and target.stat().st_size > 0:
+        _verify_original_apk(target)
         return
+    if not allow_download:
+        raise RuntimeError(
+            "封闭构建缺少 assets/original.apk；请先放入该文件再重新构建。"
+        )
     assets.mkdir(parents=True, exist_ok=True)
-    log("     未找到 original.apk，正在下载…")
-    req = urllib.request.Request(
-        ORIGINAL_APK_PARSER_URL,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; build.py)"},
-    )
-    try:
-        _download_with_progress(req, target, timeout=300)
-    except (urllib.error.URLError, OSError) as e:
-        print()
+    last_error: Exception | None = None
+    for attempt in range(1, 5):
         target.unlink(missing_ok=True)
-        raise RuntimeError(f"下载 original.apk 失败: {e}") from e
-    if not target.is_file() or target.stat().st_size == 0:
-        target.unlink(missing_ok=True)
-        raise RuntimeError("下载 original.apk 失败：保存后文件为空")
+        log(f"     未找到 original.apk，正在下载（第 {attempt}/4 次）…")
+        req = urllib.request.Request(
+            ORIGINAL_APK_PARSER_URL,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; build.py)"},
+        )
+        try:
+            _download_with_progress(req, target, timeout=300)
+            if not target.is_file() or target.stat().st_size == 0:
+                raise RuntimeError("保存后文件为空")
+            _verify_original_apk(target)
+            break
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as e:
+            last_error = e
+            print()
+            target.unlink(missing_ok=True)
+            if attempt == 4:
+                raise RuntimeError(f"下载 original.apk 失败（已重试 4 次）: {e}") from e
+            delay = attempt * 10
+            log(f"     [WARN] 下载失败: {e}；{delay} 秒后重试")
+            time.sleep(delay)
+    else:
+        raise RuntimeError(f"下载 original.apk 失败: {last_error}")
     log(f"     已保存: {_short(target)}")
 
 
@@ -176,6 +203,16 @@ def main():
         "--verbose",
         action="store_true",
         help="打印 apktool 完整输出（默认使用静默模式 -q）",
+    )
+    parser.add_argument(
+        "--hermetic",
+        action="store_true",
+        help="封闭构建：禁止下载，但仍要求本地提供并校验 assets/original.apk",
+    )
+    parser.add_argument(
+        "--no-multiplex",
+        action="store_true",
+        help="兼容构建：不执行 APK 数据复用，避免部分 Android 版本无法读取重叠的 original.apk",
     )
     args = parser.parse_args()
 
@@ -231,14 +268,15 @@ def main():
 
     try:
         log("构建开始")
-        log_step(0, 6, "检查 assets/original.apk")
+        log_step(0, 6, "检查构建输入")
         if not apk_project.exists():
             log(f"[ERROR] 工程目录不存在: {_short(apk_project)}")
             log(f"失败 · 已耗时 {time.perf_counter() - t0:.2f}s")
             return 1
 
-        ensure_original_apk(apk_project)
-        log_done_line("original.apk 就绪", t_mark)
+        ensure_original_apk(apk_project, allow_download=not args.hermetic)
+        detail = "本地 original.apk 哈希校验通过" if args.hermetic else "original.apk 就绪且哈希正确"
+        log_done_line(detail, t_mark)
         t_mark = time.perf_counter()
 
         log_step(1, 6, "apktool 打包")
@@ -247,7 +285,12 @@ def main():
             log(f"     清除缓存: {_short(build_dir)}")
             shutil.rmtree(build_dir, ignore_errors=True)
 
-        apktool_cmd = ["java", "-jar", str(apktool_jar), "b"]
+        framework_dir = BASE / ".build" / "apktool-framework"
+        framework_dir.mkdir(parents=True, exist_ok=True)
+        apktool_cmd = [
+            "java", "-jar", str(apktool_jar), "b",
+            "--frame-path", str(framework_dir),
+        ]
         if not args.verbose:
             apktool_cmd.append("-q")
         apktool_cmd.extend([str(apk_project), "-o", str(unsigned_apk)])
@@ -270,7 +313,7 @@ def main():
         log_done_line("签名", t_mark)
         t_mark = time.perf_counter()
 
-        if mux_jar.exists():
+        if mux_jar.exists() and not args.no_multiplex:
             log_step(4, 6, "ApkDataMultiplexing 优化 + 重签")
             try:
                 run(["java", "-jar", str(mux_jar), "store_asset_apk", str(signed_before_optim_apk), str(signed_stored_apk)])
@@ -281,7 +324,8 @@ def main():
                 log(f"     [WARN] ApkDataMultiplexing 失败，已回退为 apksigner 产物: {e}")
             log_done_line("ApkDataMultiplexing", t_mark)
         else:
-            log_step(4, 6, "ApkDataMultiplexing（跳过，未找到 jar）")
+            reason = "兼容模式已禁用" if args.no_multiplex else "未找到 jar"
+            log_step(4, 6, f"ApkDataMultiplexing（跳过，{reason}）")
             shutil.copy2(signed_before_optim_apk, final_apk)
             log_done_line("复制中间包为最终输出", t_mark)
         t_mark = time.perf_counter()

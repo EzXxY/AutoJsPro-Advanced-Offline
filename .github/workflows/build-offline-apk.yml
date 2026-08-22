@@ -1,0 +1,115 @@
+name: Build Fully Offline APK
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+  push:
+    tags:
+      - "offline-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      _JAVA_OPTIONS: -Xmx6g
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "build-tools;34.0.0 platform-tools"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          SECRET_KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          SECRET_KEY_PASS: ${{ secrets.KEY_PASS }}
+          SECRET_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > autojspro.jks
+            echo "KEYSTORE_PASS=$SECRET_KEYSTORE_PASS" >> "$GITHUB_ENV"
+            echo "KEY_PASS=$SECRET_KEY_PASS" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=$SECRET_KEY_ALIAS" >> "$GITHUB_ENV"
+          else
+            echo "::warning::未配置签名 Secrets，使用临时 CI 密钥；不同构建之间不能覆盖升级安装。"
+            keytool -genkeypair -noprompt \
+              -keystore autojspro.jks \
+              -storepass offline-ci-pass \
+              -keypass offline-ci-pass \
+              -alias offline-ci \
+              -keyalg RSA -keysize 3072 -validity 3650 \
+              -dname "CN=AutoJsPro Offline CI, O=Local Build, C=CN"
+            echo "KEYSTORE_PASS=offline-ci-pass" >> "$GITHUB_ENV"
+            echo "KEY_PASS=offline-ci-pass" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=offline-ci" >> "$GITHUB_ENV"
+          fi
+
+      - name: Generate hardened offline project
+        run: python make_offline.py
+
+      - name: Build compatibility APK with pinned original.apk hash
+        run: >-
+          python build.py
+          -i .build/AutojsPro_offline
+          -o AutoJsPro-fully-offline.apk
+          --no-multiplex
+
+      - name: Verify APK has no Internet permission or injected online validator
+        run: |
+          set -euo pipefail
+          AAPT="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt"
+          ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign"
+          "$AAPT" dump permissions AutoJsPro-fully-offline.apk | tee permissions.txt
+          if grep -q 'android.permission.INTERNET' permissions.txt; then
+            echo "::error::APK 仍声明 android.permission.INTERNET"
+            exit 1
+          fi
+          if unzip -l AutoJsPro-fully-offline.apk | grep -Eq 'libcoreprotect\.so|libcorevmp\.so'; then
+            echo "::error::APK 中仍包含注入的在线校验库"
+            exit 1
+          fi
+          if ! unzip -l AutoJsPro-fully-offline.apk | grep -q 'assets/original\.apk'; then
+            echo "::error::APK 缺少 libpatchio 启动所需的 assets/original.apk"
+            exit 1
+          fi
+          "$ZIPALIGN" -c -p -v 4 AutoJsPro-fully-offline.apk
+          test -s AutoJsPro-fully-offline.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: AutoJsPro-fully-offline
+          path: AutoJsPro-fully-offline.apk
+          if-no-files-found: error
+
+      - name: Copy APK for release
+        if: startsWith(github.ref, 'refs/tags/offline-v')
+        run: cp AutoJsPro-fully-offline.apk "AutoJsPro-fully-offline-${{ github.ref_name }}.apk"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/offline-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: AutoJsPro-fully-offline-${{ github.ref_name }}.apk
+          generate_release_notes: true
