@@ -109,7 +109,7 @@ python build.py -v
 
 ```bash
 python make_offline.py
-python build.py -i .build/AutojsPro_offline -o AutoJsPro-fully-offline.apk
+python build.py -i .build/AutojsPro_offline -o AutoJsPro-fully-offline.apk --no-multiplex
 ```
 
 `build.py` 首次会获取约 100 MB 的 `original.apk`，并要求 SHA-256 必须为：
@@ -121,6 +121,11 @@ python build.py -i .build/AutojsPro_offline -o AutoJsPro-fully-offline.apk
 该文件不是联网功能，而是 `libpatchio.so` 在 `attachBaseContext()` 阶段读取的运行时补丁输入；
 删除它会导致应用在界面出现前直接闪退。若构建环境本身也必须断网，请预先将文件放入
 `.build/AutojsPro_offline/assets/original.apk`，然后使用 `--hermetic` 禁止构建脚本下载。
+
+默认示例额外使用 `--no-multiplex` 生成约 200 MB 的兼容包。数据复用优化会让多个 ZIP
+条目共享底层字节，在部分新版 Android / OEM ROM 上虽然能够安装和通过签名校验，
+但 `AssetManager` 仍可能无法读取 `assets/original.apk`，随后在 `NativePatchio.Start()`
+阶段闪退。确认目标设备兼容后，才建议去掉该参数以缩小 APK。
 
 生成的 APK 没有 Android `INTERNET` 权限，因此应用本体和脚本均不能直接建立 TCP/UDP 网络连接；
 远程调试、网络请求、在线文档、热更新等联网功能也会随之不可用。

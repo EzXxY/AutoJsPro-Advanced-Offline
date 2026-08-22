@@ -203,6 +203,11 @@ def main():
         action="store_true",
         help="封闭构建：禁止下载，但仍要求本地提供并校验 assets/original.apk",
     )
+    parser.add_argument(
+        "--no-multiplex",
+        action="store_true",
+        help="兼容构建：不执行 APK 数据复用，避免部分 Android 版本无法读取重叠的 original.apk",
+    )
     args = parser.parse_args()
 
     config_path = BASE / "config.json"
@@ -302,7 +307,7 @@ def main():
         log_done_line("签名", t_mark)
         t_mark = time.perf_counter()
 
-        if mux_jar.exists():
+        if mux_jar.exists() and not args.no_multiplex:
             log_step(4, 6, "ApkDataMultiplexing 优化 + 重签")
             try:
                 run(["java", "-jar", str(mux_jar), "store_asset_apk", str(signed_before_optim_apk), str(signed_stored_apk)])
@@ -313,7 +318,8 @@ def main():
                 log(f"     [WARN] ApkDataMultiplexing 失败，已回退为 apksigner 产物: {e}")
             log_done_line("ApkDataMultiplexing", t_mark)
         else:
-            log_step(4, 6, "ApkDataMultiplexing（跳过，未找到 jar）")
+            reason = "兼容模式已禁用" if args.no_multiplex else "未找到 jar"
+            log_step(4, 6, f"ApkDataMultiplexing（跳过，{reason}）")
             shutil.copy2(signed_before_optim_apk, final_apk)
             log_done_line("复制中间包为最终输出", t_mark)
         t_mark = time.perf_counter()
